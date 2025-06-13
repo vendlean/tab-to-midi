@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tab to MIDI – wersja rozszerzona</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; }
+    textarea, input, select { width: 100%; margin-bottom: 1rem; padding: 0.5rem; font-family: monospace; }
+    button { padding: 0.5rem 1rem; background-color: #4f46e5; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    .hidden { display: none; }
+    .section { margin-top: 2rem; }
+  </style>
+</head>
+<body>
+  <h1>🎸 Tab to MIDI – wybierz sposób wprowadzania</h1>
+
+  <select id="inputMode" onchange="changeMode()">
+    <option value="textarea">Wklej tabulaturę tekstową</option>
+    <option value="form">Dodaj pojedyncze dźwięki</option>
+    <option value="file">Wczytaj z pliku .txt</option>
+  </select>
+
+  <div id="mode-textarea" class="section">
+    <textarea id="tabInput" placeholder="e|------0-------|
+B|----1---1-----|
+G|--2-------2---|
+D|--------------|
+A|--------------|
+E|--------------|"></textarea>
+    <button onclick="convertTextarea()">Konwertuj do MIDI</button>
+  </div>
+
+  <div id="mode-form" class="section hidden">
+    <label>Struna:
+      <select id="noteString">
+        <option value="E">E (niska)</option>
+        <option value="A">A</option>
+        <option value="D">D</option>
+        <option value="G">G</option>
+        <option value="B">B</option>
+        <option value="e">e (wysoka)</option>
+      </select>
+    </label>
+    <label>Próg: <input type="number" id="noteFret" min="0" max="24" /></label>
+    <label>Czas (pozycja): <input type="number" id="noteTime" min="0" /></label>
+    <button onclick="addNote()">Dodaj nutę</button>
+    <pre id="notePreview"></pre>
+    <button onclick="convertFromForm()">Konwertuj do MIDI</button>
+  </div>
+
+  <div id="mode-file" class="section hidden">
+    <input type="file" id="fileInput" accept=".txt" />
+    <button onclick="readFile()">Wczytaj i konwertuj do MIDI</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tonejs/midi/build/Midi.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+  <script>
+    const openStringMidi = { E: 40, A: 45, D: 50, G: 55, B: 59, e: 64 };
+    let addedNotes = [];
+
+    function changeMode() {
+      const mode = document.getElementById("inputMode").value;
+      document.querySelectorAll(".section").forEach(el => el.classList.add("hidden"));
+      document.getElementById("mode-" + mode).classList.remove("hidden");
+    }
+
+    function parseTab(tabText) {
+      const lines = tabText.trim().split("\n").filter(line => line.includes("|"));
+      const tab = {};
+      for (let line of lines) {
+        const key = line[0];
+        tab[key] = line.slice(2);
+      }
+      return tab;
+    }
+
+    function convertTextarea() {
+      const tab = parseTab(document.getElementById("tabInput").value);
+      const midi = new Midi();
+      const track = midi.addTrack();
+      const length = Math.max(...Object.values(tab).map(l => l.length));
+      for (let i = 0; i < length;) {
+        let advance = 1;
+        for (let s in openStringMidi) {
+          const seg = (tab[s] || '').slice(i, i + 2);
+          const match = seg.match(/\d{1,2}/);
+          if (match && match.index === 0) {
+            track.addNote({ midi: openStringMidi[s] + parseInt(match[0]), time: i * 0.25, duration: 0.25 });
+            if (match[0].length > advance) advance = match[0].length;
+          }
+        }
+        i += advance;
+      }
+      const blob = new Blob([new Uint8Array(midi.toArray())], { type: "audio/midi" });
+      saveAs(blob, "output-textarea.mid");
+    }
+
+    function addNote() {
+      const string = document.getElementById("noteString").value;
+      const fret = parseInt(document.getElementById("noteFret").value);
+      const time = parseFloat(document.getElementById("noteTime").value);
+      if (!isNaN(fret) && !isNaN(time)) {
+        addedNotes.push({ string, fret, time });
+        document.getElementById("notePreview").textContent = JSON.stringify(addedNotes, null, 2);
+      }
+    }
+
+    function convertFromForm() {
+      const midi = new Midi();
+      const track = midi.addTrack();
+      addedNotes.forEach(({ string, fret, time }) => {
+        track.addNote({ midi: openStringMidi[string] + fret, time: time * 0.25, duration: 0.25 });
+      });
+      const blob = new Blob([new Uint8Array(midi.toArray())], { type: "audio/midi" });
+      saveAs(blob, "output-form.mid");
+    }
+
+    function readFile() {
+      const file = document.getElementById("fileInput").files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        document.getElementById("tabInput").value = reader.result;
+        convertTextarea();
+      };
+      reader.readAsText(file);
+    }
+  </script>
+</body>
+</html>
